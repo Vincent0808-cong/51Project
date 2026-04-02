@@ -1,0 +1,152 @@
+#include <REGX52.H>
+#include <INTRINS.H>
+#include "Delay.h"
+
+#define MAX_TASKS 2 //��ʾ����������
+#define MAX_TASK_DEP 32 //��ʾջ�����
+#define TASK0_PERIOD 500 //����һ����
+#define TASK1_PERIOD 1000 //���������
+
+typedef enum{
+	TASK_RUN,
+	TASK_SUSPEND
+}TaskState;
+
+unsigned char idata task_sp[MAX_TASKS];//����Ķ�ջָ�루������ģ�
+unsigned char idata task_stack[MAX_TASKS][MAX_TASK_DEP];//ÿ��task����Ķ�ջ
+unsigned char task_id;//��ǰ�����
+TaskState task_state[MAX_TASKS];
+unsigned int task0_cnt,task1_cnt;
+		
+void task_switch(void);
+void task0(void);
+void task1(void);
+void task_load(unsigned int fn,unsigned char tid);
+void Timer0_Init();
+void Mode_Switch(void);
+
+void main()
+{
+	task_state[0] = TASK_RUN;  //�ϵ�������Ϊ����ģʽ
+	task_state[1] = TASK_RUN;
+	task_load(task0,0);
+	task_load(task1,1);
+	task_id = 0;
+	SP=task_sp[0];
+	Timer0_Init();
+	while(1)
+	{
+		Mode_Switch();
+	}
+}
+
+void task_switch()   //ת������
+{
+   task_sp[task_id]=SP;  //ȡ��ջ������
+	
+	task_id=task_id+1;   
+	if(task_id==MAX_TASKS)  //�ж�
+	{
+	  task_id=0;
+	}
+	SP=task_sp[task_id];  //��������
+}
+
+void task0()
+{
+	P1_0=0;
+  while(1)
+	{
+		if(task_state==TASK_RUN) //����ģʽ�²�ִ���߼�
+		{
+			if(task0_cnt>=TASK0_PERIOD)
+			{
+				task0_cnt=0;   //����������
+				P1_0=~P1_0;
+			}
+		}
+		task_switch();
+	}
+}
+
+void task1()
+{
+	P1_7=0;
+  while(1)
+	{
+		if(task_state==TASK_RUN)
+		{
+			if(task1_cnt>=TASK1_PERIOD)
+			{
+				task1_cnt=0;
+				P1_7=~P1_7;
+			}
+		}
+		task_switch();
+	}
+}
+	
+void task_load(unsigned int fn,unsigned char tid)
+{
+  //task_sp[tid]=  task_stack[tid]+1;//������һ������
+	task_stack[tid][1] = (unsigned char)(fn >> 8);  //�߰�λ
+	task_stack[tid][0] = (unsigned char)fn;  		//�Ͱ�λ
+	task_sp[tid] = (unsigned char)&task_stack[tid][1];
+}
+
+void Timer0_Init()   //��ʱ����ʱ1ms
+{		
+	TMOD &= 0xF0;	
+	TMOD |= 0x01;		
+	TL0 = 0x18;		
+	TH0 = 0xFC;		
+	TF0 = 0;		
+	TR0 = 1;
+	ET0 = 1;
+	EA = 1;
+	PT0 = 0;
+}
+
+
+void Timer0_ISR() interrupt 1
+{
+	TL0 = 0x18;	
+	TH0 = 0xFC;	
+	if(task_state[0]==TASK_RUN)
+	{
+		task0_cnt++;
+		if(task0_cnt>=500)task0_cnt=0;//��ʱ0.5��
+	}
+	if(task_state[1]==TASK_RUN)
+	{
+		task1_cnt++;
+		if(task1_cnt>=1000)task1_cnt=0;//��ʱ1��
+	}
+	task_switch();
+}
+
+
+void Mode_Switch(void)   //����/����ģʽת��
+{
+	unsigned char cnt=0;
+	if(P3_1 == 0)
+	{
+		Delay(10);
+		while(P3_1 == 0);
+		Delay(10);
+		cnt++;
+		if(cnt>=2)cnt=0;
+		if(cnt == 1)task_state[0] = TASK_SUSPEND;
+		if(cnt == 0)task_state[0] = TASK_RUN;
+	}		
+	if(P3_0 == 0)
+	{
+		Delay(10);
+		while(P3_1 == 0);
+		Delay(10);
+		cnt++;
+		if(cnt>=2)cnt=0;
+		if(cnt == 1)task_state[1] = TASK_SUSPEND;
+		if(cnt == 0)task_state[1] = TASK_RUN;
+	}
+}
